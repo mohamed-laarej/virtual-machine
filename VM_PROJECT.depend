@@ -5,7 +5,7 @@
 	<stdint.h>
 	"vm_16b.h"
 
-1739661589 source:c:\users\pc\documents\vm_project\main.c
+1739733065 source:c:\users\pc\documents\vm_project\main.c
 	<stdio.h>
 	<string.h>
 	"vm_32b.h"
@@ -14,11 +14,11 @@
 	<stdlib.h>
 	<stdint.h>
 
-1739661590 source:c:\users\pc\documents\vm_project\vm_32b.c
+1739733405 source:c:\users\pc\documents\vm_project\vm_32b.c
 	<stdio.h>
 	"vm_32b.h"
 
-1739658695 c:\users\pc\documents\vm_project\vm_32b.h
+1739733269 c:\users\pc\documents\vm_project\vm_32b.h
 	<stdlib.h>
 	<stdint.h>
 	<string.h>

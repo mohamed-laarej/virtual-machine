@@ -2,34 +2,75 @@
 #include "vm_32b.h"
 
 
-
-int is_valid_data_address(uint32_t addr) {
-    return (addr >= 0 && addr < DATA_SIZE);
+int validate_code_access(VM *vm, uint32_t addr) {
+    if (addr < vm->cpu.cs_base || addr >= vm->cpu.cs_base + vm->cpu.cs_limit) {
+        printf("Code Segment Fault: 0x%x\n", addr);
+        return 0;
+    }
+    return 1;
 }
 
-int is_valid_code_address(uint32_t addr) {
-    return (addr >= CODE_START && addr < CODE_START + CODE_MAX_SIZE);
+int validate_data_access(VM *vm, uint32_t addr, int is_write) {
+    if (addr < vm->cpu.ds_base || addr >= vm->cpu.ds_base + vm->cpu.ds_limit) {
+        printf("Data Segment Fault: 0x%x\n", addr);
+        return 0;
+    }
+    if (is_write && !(vm->cpu.ds_flags & 0x2)) {
+        printf("Data Write Permission Denied\n");
+        return 0;
+    }
+    return 1;
 }
 
-int is_valid_stack_address(uint32_t addr) {
-    return (addr >= STACK_START && addr < STACK_BOTTOM);
+int validate_stack_access(VM *vm, uint32_t addr, int is_write) {
+    if (addr < vm->cpu.ss_base || addr >= vm->cpu.ss_base + vm->cpu.ss_limit) {
+        printf("Stack Segment Fault: 0x%x\n", addr);
+        return 0;
+    }
+    if (is_write && !(vm->cpu.ss_flags & 0x2)) {
+        printf("Stack Write Permission Denied\n");
+        return 0;
+    }
+    return 1;
 }
 void init_VM32(VM *vm) {
 
+    // Initialize registers
     for (int i = 0; i < 8; i++) {
         vm->cpu.regs[i].value = 0;
     }
-    vm->cpu.ip = &vm->memory[CODE_START];// Start at code section
-    vm->cpu.sp = STACK_BOTTOM -1; // Start execution at memory base
+
+    // ========== NEW: Segment Setup ==========
+    // Code Segment: Base 0x0000, 32KB
+    vm->cpu.cs_base = 0x0000;
+    vm->cpu.cs_limit = 0x8000;
+    vm->cpu.cs_flags = 0x5;  // 0b101 (Read + Execute)
+
+    // Data Segment: Base 0x8000, 16KB
+    vm->cpu.ds_base = 0x8000;
+    vm->cpu.ds_limit = 0x4000;
+    vm->cpu.ds_flags = 0x3;  // 0b011 (Read + Write)
+
+    // Stack Segment: Base 0xC000, 32KB
+    vm->cpu.ss_base = 0xC000;
+    vm->cpu.ss_limit = 0x8000;
+    vm->cpu.ss_flags = 0x3;  // 0b011 (Read + Write)
+
+    // Initialize instruction pointer and stack pointer
+    vm->cpu.ip = &vm->memory[vm->cpu.cs_base];
+    vm->cpu.sp = vm->cpu.ss_base + vm->cpu.ss_limit - 1;
     vm->cpu.zero_flag = 0;
 }
 
 void load_program32(VM *vm, WORD *program, size_t program_size) {
-
-    for (int i = 0; i < program_size; i++) {
-        vm->memory[i] = program[i];
+    if (!validate_code_access(vm, vm->cpu.cs_base + program_size - 1)) {
+        printf("Program too large for code segment!\n");
+        return;
     }
 
+    for (int i = 0; i < program_size; i++) {
+        vm->memory[vm->cpu.cs_base + i] = program[i];
+    }
 }
 
 void run_programs32(VM *vm) {
@@ -47,7 +88,7 @@ void run_programs32(VM *vm) {
 
                 vm->cpu.regs[reg1].value = vm->cpu.regs[reg2].value + vm->cpu.regs[reg3].value;
 
-                printf("Added R%d and R%d int R%: New value of R%d = %d\n",
+                printf("Added R%d and R%d int R%d: New value of R%d = %d\n",
                        reg3, reg2,reg1, reg1, vm->cpu.regs[reg1].value);
                 printf("The value in R%d is: %d\n", reg1, vm->cpu.regs[reg1].value);
                 break;
@@ -96,23 +137,40 @@ void run_programs32(VM *vm) {
             }
             case MovM: {
                 uint8_t reg = (operand >> 23) & 0x7;
-                uint32_t addr = operand & 0x7FFFFF; // 23-bit address
-                vm->cpu.regs[reg].value = vm->memory[addr + DATA_START];
-                printf("Moved the value in address %d into R%d\n", addr, reg);
-                printf("The value in R%d is: %d\n", reg, vm->cpu.regs[reg].value);
+                uint32_t addr = operand & 0x7FFFFF; // Absolute address
+
+                if (!validate_data_access(vm, addr, 0)) {
+                    running = 0;
+                    break;
+                }
+
+                vm->cpu.regs[reg].value = vm->memory[addr];
+                printf("Loaded from 0x%x to R%d\n", addr, reg);
                 break;
             }
             case Loadf: {
                     uint8_t reg = (operand >> 23) & 0x7;
                     uint32_t addr = operand & 0x7FFFFF;
-                    vm->cpu.regs[reg].value = vm->memory[DATA_START + addr];
+
+                    if (!validate_data_access(vm, vm->cpu.ds_base + addr, 0)) {
+                        running = 0;
+                        break;
+                    }
+
+                    vm->cpu.regs[reg].value = vm->memory[vm->cpu.ds_base + addr];
                     printf("Loaded float from address %d into R%d\n", addr, reg);
                     break;
                 }
             case Storef: {
                     uint8_t reg = (operand >> 23) & 0x7;
                     uint32_t addr = operand & 0x7FFFFF;
-                    vm->memory[DATA_START + addr] = vm->cpu.regs[reg].value;
+
+                    if (!validate_data_access(vm, vm->cpu.ds_base + addr, 1)) {
+                        running = 0;
+                        break;
+                    }
+
+                    vm->memory[vm->cpu.ds_base + addr] = vm->cpu.regs[reg].value;
                     printf("Stored float from R%d into address %d\n", reg, addr);
                     break;
                 }
@@ -191,10 +249,9 @@ void run_programs32(VM *vm) {
                 }
             case Push: {
                  uint8_t reg = (operand >> 23) & 0x7;
-                vm->cpu.sp--;
+                 vm->cpu.sp--;
 
-                if (!is_valid_stack_address(vm->cpu.sp)) {
-                    printf("Stack Overflow! SP: %d\n", vm->cpu.sp);
+                 if (!validate_stack_access(vm, vm->cpu.sp, 1)) {
                     running = 0;
                     break;
                 }
@@ -206,8 +263,7 @@ void run_programs32(VM *vm) {
             case Pop: {
                 uint8_t reg = (operand >> 23) & 0x7;
 
-                if (!is_valid_stack_address(vm->cpu.sp)) {
-                    printf("Stack Underflow! SP: %d\n", vm->cpu.sp);
+                if (!validate_stack_access(vm, vm->cpu.sp, 0)) {
                     running = 0;
                     break;
                 }
@@ -219,16 +275,17 @@ void run_programs32(VM *vm) {
             }
             case Store: {
                 uint8_t reg = (operand >> 23) & 0x7;
-                uint32_t addr = operand & 0x7FFFFF;
+                uint32_t offset = operand & 0x7FFFFF;
+                uint32_t absolute_addr = vm->cpu.ds_base + offset;
 
-                if (!is_valid_data_address(addr)) {
-                    printf("Memory Error: Invalid data address %d\n", addr);
+                // Validate data segment write access
+                if (!validate_data_access(vm, absolute_addr, 1)) {
                     running = 0;
                     break;
                 }
 
-                vm->memory[DATA_START + addr] = vm->cpu.regs[reg].value;
-                printf("Stored %d at address %d\n", vm->cpu.regs[reg].value, addr);
+                vm->memory[absolute_addr] = vm->cpu.regs[reg].value;
+                printf("Stored %d at 0x%x\n", vm->cpu.regs[reg].value, absolute_addr);
                 break;
             }
             case And: {
@@ -265,9 +322,13 @@ void run_programs32(VM *vm) {
                 break;
             }
             case Jmp: {
+                if (!validate_code_access(vm, operand)) {
+                    running = 0;
+                    break;
+                }
                 vm->cpu.ip = &vm->memory[operand];
                 printf("Jumping to address %d\n", operand);
-                continue; // Skip the automatic ip increment
+                continue;
             }
             case Jz: {
                 if (vm->cpu.zero_flag) {
@@ -282,21 +343,35 @@ void run_programs32(VM *vm) {
         case Loads: {
                 uint8_t reg = (operand >> 23) & 0x7;
                 uint32_t addr = operand & 0x7FFFFF;
-                vm->cpu.regs[reg].value = vm->memory[DATA_START + addr] & 0xFF; // Store as byte
+                if (!validate_data_access(vm, addr, 0)) {
+                    running = 0;
+                    break;
+                }
+                vm->cpu.regs[reg].value = vm->memory[vm->cpu.ds_base + addr] & 0xFF; // Store as byte
                 break;
             }
         case Stors: {
                 uint8_t reg = (operand >> 23) & 0x7;
                 uint32_t addr = operand & 0x7FFFFF;
-                vm->memory[DATA_START + addr] = vm->cpu.regs[reg].value & 0xFF;
+                if (!validate_data_access(vm, addr, 0)) {
+                    running = 0;
+                    break;
+                }
+                vm->memory[vm->cpu.ds_base + addr] = vm->cpu.regs[reg].value & 0xFF;
                 break;
             }
         case Strlen: {
                 uint8_t dest = (operand >> 23) & 0x7;
                 uint8_t src = (operand >> 20) & 0x7;
                 uint32_t addr = vm->cpu.regs[src].value;
+
+                if (!validate_data_access(vm, addr, 0)) {
+                    running = 0;
+                    break;
+                }
+
                 uint32_t len = 0;
-                while (vm->memory[DATA_START + addr + len] & 0xFF) len++;
+                while (vm->memory[addr + len] & 0xFF) len++;
                 vm->cpu.regs[dest].value = len;
                 break;
             }
@@ -305,10 +380,17 @@ void run_programs32(VM *vm) {
                 uint8_t src_reg = (operand >> 20) & 0x7;
                 uint32_t dest = vm->cpu.regs[dest_reg].value;
                 uint32_t src = vm->cpu.regs[src_reg].value;
+
+                if (!validate_data_access(vm, dest, 1) ||  // Validate dest is writable
+                    !validate_data_access(vm, src, 0)) {   // Validate src is readable
+                    running = 0;
+                    break;
+                }
+
                 uint32_t i = 0;
                 do {
-                    vm->memory[DATA_START + dest + i] = vm->memory[DATA_START + src + i];
-                } while (vm->memory[DATA_START + src + i++] & 0xFF);
+                    vm->memory[dest + i] = vm->memory[src + i];
+                } while (vm->memory[src + i++] & 0xFF);
                 break;
             }
 // Similarly implement Strcat, Strcmp
@@ -320,8 +402,8 @@ void run_programs32(VM *vm) {
                 int cmp = 0;
                 uint32_t i = 0;
                 while (1) {
-                    int32_t c1 = vm->memory[DATA_START + addr1 + i] & 0xFF;
-                    int32_t c2 = vm->memory[DATA_START + addr2 + i] & 0xFF;
+                    int32_t c1 = vm->memory[vm->cpu.ds_base + addr1 + i] & 0xFF;
+                    int32_t c2 = vm->memory[vm->cpu.ds_base + addr2 + i] & 0xFF;
                     if (c1 != c2) {
                         cmp = (c1 > c2) ? 1 : -1;
                         break;
@@ -346,7 +428,7 @@ void run_programs32(VM *vm) {
 
                 uint32_t dest_len = 0;
 
-                while (vm->memory[DATA_START + dest_addr + dest_len] & 0xFF) {
+                while (vm->memory[vm->cpu.ds_base + dest_addr + dest_len] & 0xFF) {
 
                 dest_len++;
 
@@ -358,9 +440,9 @@ void run_programs32(VM *vm) {
 
                 while (1) {
 
-                int32_t src_char = vm->memory[DATA_START + src_addr + i];
+                int32_t src_char = vm->memory[vm->cpu.ds_base + src_addr + i];
 
-                vm->memory[DATA_START + dest_addr + dest_len + i] = src_char;
+                vm->memory[vm->cpu.ds_base + dest_addr + dest_len + i] = src_char;
 
                 if ((src_char & 0xFF) == 0) {
 
@@ -379,18 +461,25 @@ void run_programs32(VM *vm) {
 }
             case Call: {
                 uint32_t target_addr = operand;
-                // Calculate return address (current IP position + 1)
+
+                if (!validate_code_access(vm, target_addr)) {
+                    running = 0;
+                    break;
+                }
+
                 uint32_t return_addr = (uint32_t)(vm->cpu.ip - vm->memory) + 1;
-
-                // Push return address onto the stack
                 vm->cpu.sp--;
+
+                // ADD STACK VALIDATION
+                if (!validate_stack_access(vm, vm->cpu.sp, 1)) {
+                    running = 0;
+                    break;
+                }
+
                 vm->memory[vm->cpu.sp] = return_addr;
-
-                // Jump to target address
                 vm->cpu.ip = &vm->memory[target_addr];
-
                 printf("CALL to 0x%x (return to 0x%x)\n", target_addr, return_addr);
-                continue; // Skip IP increment
+                continue;
             }
 
             case Ret: {
@@ -411,15 +500,21 @@ void run_programs32(VM *vm) {
                 break;
             }
             case PrintI: {
-                uint32_t addr = operand & 0x7FFFFF; // Extract 23-bit address
-                int32_t value = vm->memory[DATA_START + addr];
+                uint32_t addr = operand & 0x7FFFFF;
+
+                if (!validate_data_access(vm, vm->cpu.ds_base + addr, 0)) {
+                    running = 0;
+                    break;
+                }
+
+                int32_t value = vm->memory[vm->cpu.ds_base + addr];
                 printf("%d\n", value);
                 break;
             }
 
             case PrintS: {
                 uint32_t addr = operand & 0x7FFFFF;
-                uint32_t current_addr = DATA_START + addr;
+                uint32_t current_addr = vm->cpu.ds_base + addr;
                 while (1) {
                     uint32_t word = vm->memory[current_addr];
                     char c = (char)(word & 0xFF); // Extract the least significant byte
@@ -432,10 +527,16 @@ void run_programs32(VM *vm) {
 
             case PrintF: {
                 uint32_t addr = operand & 0x7FFFFF;
-                uint32_t float_bits = vm->memory[DATA_START + addr];
+
+                if (!validate_data_access(vm, vm->cpu.ds_base + addr, 0)) {
+                    running = 0;
+                    break;
+                }
+
+                uint32_t float_bits = vm->memory[vm->cpu.ds_base + addr];
                 float value;
                 memcpy(&value, &float_bits, sizeof(float));
-                printf("%.2f\n", value); // Print with 2 decimal places
+                printf("%.2f\n", value);
                 break;
             }
             // Shift Left
@@ -488,7 +589,7 @@ void run_programs32(VM *vm) {
                 int32_t value;
                 printf("\nEnter integer for address %d: ", addr);
                 scanf("%d", &value);
-                vm->memory[DATA_START + addr] = value;
+                vm->memory[vm->cpu.ds_base + addr] = value;
                 printf("Stored %d at address %d\n", value, addr);
                 break;
             }
@@ -499,9 +600,13 @@ void run_programs32(VM *vm) {
                 char buffer[256];
                 printf("\nEnter string (max 255 chars): ");
                 scanf("%255s", buffer);
+                if (!validate_data_access(vm, vm->cpu.ds_base + addr, 1)) {
+                    running = 0;
+                    break;
+                }
 
-                uint32_t current_addr = DATA_START + addr;
-                for (int i = 0; i <= strlen(buffer); i++) { // Include null terminator
+                uint32_t current_addr = vm->cpu.ds_base + addr;
+                for (int i = 0; i <= strlen(buffer); i++) {
                     vm->memory[current_addr + i] = buffer[i];
                 }
                 break;
@@ -538,7 +643,7 @@ void run_programs32(VM *vm) {
                 // Store as 32-bit IEEE 754 representation
                 uint32_t float_bits;
                 memcpy(&float_bits, &value, sizeof(float));
-                vm->memory[DATA_START + addr] = float_bits;
+                vm->memory[vm->cpu.ds_base + addr] = float_bits;
 
                 printf("Stored %.2f at address %d\n", value, addr);
                 break;

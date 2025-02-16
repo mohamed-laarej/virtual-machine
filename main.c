@@ -6,23 +6,18 @@ int main() {
     VM vm;
     init_VM32(&vm);
 
-    // Initialize strings in data segment
 WORD program[] = {
-    // Test READF
-    PRINTS(100),        // "Enter float: "
-    READF(0),          // Read to DATA_START+0
+    // Valid data access (ds_base + 0 = 0x8000)
+    MOV_IMM(0, 123),
+    STORE(0, 0x0),      // Store at ds_base + 0 (valid)
 
-    // Test memory protection
-    MOV_IMM(0, 999),
-    STORE(0, DATA_SIZE + 100), // Invalid data access
+    // Invalid data access (ds_base + 0x4000 = 0xC000)
+    MOV_IMM(1, 456),
+    STORE(1, 0x4000),   // Store at 0xC000 (stack segment)
+
     HALT
 };
 
-// Initialize string at DATA_START+100
-const char *prompt = "Enter float: ";
-for (int i = 0; i <= strlen(prompt); i++) {
-    vm.memory[DATA_START + 100 + i] = prompt[i];
-}
 
     load_program32(&vm, program, sizeof(program)/sizeof(WORD));
     run_programs32(&vm);

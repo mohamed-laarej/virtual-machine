@@ -12,7 +12,7 @@
 
 #define MEMORY_SIZE 100000
 
-// Code segment
+/*// Code segment
 #define CODE_START 0x0000
 #define CODE_MAX_SIZE 0x8000   // Max code size (32KB)
 // Data segment
@@ -22,7 +22,7 @@
 #define STACK_START DATA_START + DATA_SIZE  // Stack Starts after data
 #define STACK_SIZE 0x8000 //32KB
 #define STACK_BOTTOM STACK_START + STACK_SIZE   // Stack end
-
+*/
 
 #define REG int32_t
 #define WORD int32_t
@@ -154,11 +154,24 @@ typedef enum {
 typedef struct {
     uint32_t value;
 } REGS;
+
 typedef struct cpu_s {
     REGS regs[8];  // General-purpose registers (R0-R3)
     WORD sp;       // Stack pointer (SP)
     WORD *ip;      // Instruction pointer
     int zero_flag;
+        // ========== NEW: Segment Registers ==========
+    uint32_t cs_base;   // Code segment base
+    uint32_t cs_limit;  // Code segment size
+    uint32_t ds_base;   // Data segment base
+    uint32_t ds_limit;  // Data segment size
+    uint32_t ss_base;   // Stack segment base
+    uint32_t ss_limit;  // Stack segment size
+
+    // ========== NEW: Permission Flags ==========
+    uint8_t cs_flags;   // RX (Read/Execute)
+    uint8_t ds_flags;   // RW (Read/Write)
+    uint8_t ss_flags;   // RW (Read/Write)
 } CPU;
 typedef struct vm_s {
     CPU cpu;
@@ -174,5 +187,8 @@ static inline uint32_t get_immediate(WORD instruction) { return instruction & 0x
 void init_VM32(VM *vm) ;
 void load_program32(VM *vm, WORD *program, size_t program_size);
 void run_programs32(VM *vm);
+int validate_code_access(VM *vm, uint32_t addr);
+int validate_data_access(VM *vm, uint32_t addr, int is_write);
+int validate_stack_access(VM *vm, uint32_t addr, int is_write);
 
 #endif // VM_32B_H_INCLUDED
