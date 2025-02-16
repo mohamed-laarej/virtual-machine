@@ -4,6 +4,8 @@
 *.exe
 *.bin
 *.elf
+*.depend
+*.layout
 
 # Build directories
 /build/
@@ -14,8 +16,8 @@
 *.tmp
 
 # OS-specific files
-.DS_Store  # macOS
-Thumbs.db  # Windows
+.DS_Store
+Thumbs.db
 
 # IDE files
 .vscode/
