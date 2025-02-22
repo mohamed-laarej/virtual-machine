@@ -11,23 +11,10 @@
 // 26 - 3 = 23
 
 #define MEMORY_SIZE 100000
-
-/*// Code segment
-#define CODE_START 0x0000
-#define CODE_MAX_SIZE 0x8000   // Max code size (32KB)
-// Data segment
-#define DATA_START CODE_START + CODE_MAX_SIZE
-#define DATA_SIZE 0x4000 // 16KB
-//Stack segment
-#define STACK_START DATA_START + DATA_SIZE  // Stack Starts after data
-#define STACK_SIZE 0x8000 //32KB
-#define STACK_BOTTOM STACK_START + STACK_SIZE   // Stack end
-*/
+#define DEBUG 0
 
 #define REG int32_t
 #define WORD int32_t
-
-
 
 #define MOV_IMM(reg, value)  ((MovI << 26) | ((reg & 0x7) << 23) | (value & 0x7FFFFF))
 #define MOV_MEM(reg, addr)   ((MovM << 26) | ((reg & 0x7) << 23) | (addr & 0x7FFFFF))
@@ -38,7 +25,7 @@
 #define MULT(dest, src1, src2) ((Mult << 26) | ((dest & 0x7) << 23) | ((src1 & 0x7) << 20) | (src2 & 0x7) << 17)
 #define DIV(dest, src1, src2) ((Div << 26) | ((dest & 0x7) << 23) | ((src1 & 0x7) << 20) | (src2 & 0x7) << 17)
 #define SUB(dest, src1, src2) ((Sub << 26) | ((dest & 0x7) << 23) | ((src1 & 0x7) << 20) | (src2 & 0x7) << 17)
-#define AND(dest, src1, src2) ((And << 26) | (((dest & 0x7) << 23) | ((src1 & 0x7) << 20) | (src2 & 0x7) << 17)
+#define AND(dest, src1, src2) ((And << 26) | (((dest & 0x7) << 23) | ((src1 & 0x7) << 20) | (src2 & 0x7) << 17))
 #define OR(dest, src1, src2)  ((Or  << 26) | ((dest & 0x7) << 23) | ((src1 & 0x7) << 20) | (src2 & 0x7) << 17)
 #define XOR(dest, src1, src2) ((Xor << 26) | ((dest & 0x7) << 23) | ((src1 & 0x7) << 20) | (src2 & 0x7) << 17)
 #define CMP(reg1, reg2)       ((Cmp << 26) | ((reg1 & 0x7) << 23) | ((reg2 & 0x7) << 20))  // Uses only two registers
@@ -172,23 +159,86 @@ typedef struct cpu_s {
     uint8_t cs_flags;   // RX (Read/Execute)
     uint8_t ds_flags;   // RW (Read/Write)
     uint8_t ss_flags;   // RW (Read/Write)
+
+    int skip_increment;
 } CPU;
+
+typedef struct vm_s VM;  // Forward declaration of VM struct
+
+//Instructions Table
+typedef void (*InstructionFunc)(VM *, WORD);
+
+
 typedef struct vm_s {
     CPU cpu;
     WORD memory[MEMORY_SIZE];
+    InstructionFunc instruction_table[64];
 } VM;
 
-/*static inline uint8_t get_reg1(WORD instruction) { return (instruction >> 23) & 0x7; }
-static inline uint8_t get_reg2(WORD instruction) { return (instruction >> 20) & 0x7; }
-static inline uint8_t get_reg3(WORD instruction) { return (instruction >> 17) & 0x7; }
-static inline uint32_t get_address(WORD instruction) { return instruction & 0x03FFFFFF; }
-static inline uint32_t get_immediate(WORD instruction) { return instruction & 0x7FFFFF; }
-*/
+
+
 void init_VM32(VM *vm) ;
 void load_program32(VM *vm, WORD *program, size_t program_size);
 void run_programs32(VM *vm);
+//==============access validation functions==================
 int validate_code_access(VM *vm, uint32_t addr);
 int validate_data_access(VM *vm, uint32_t addr, int is_write);
 int validate_stack_access(VM *vm, uint32_t addr, int is_write);
+
+//==================Execution Functions=======================
+void movI_execution(VM *vm, WORD operand);
+void movM_execution(VM *vm, WORD operand);
+void add_execution(VM *vm, WORD operand);
+void sub_execution(VM *vm, WORD operand);
+void mult_execution(VM *vm, WORD operand);
+void div_execution(VM *vm, WORD operand);
+void halt_execution(VM *vm, WORD operand);
+void store_execution(VM *vm, WORD operand);
+void push_execution(VM *vm, WORD operand);
+void pop_execution(VM *vm, WORD operand);
+void and_execution(VM *vm, WORD operand);
+void or_execution(VM *vm, WORD operand);
+void xor_execution(VM *vm, WORD operand);
+void cmp_execution(VM *vm, WORD operand);
+void jmp_execution(VM *vm, WORD operand);
+void jz_execution(VM *vm, WORD operand);
+            //strings functions
+void loads_execution(VM *vm, WORD operand);
+void stors_execution(VM *vm, WORD operand);
+void strlen_execution(VM *vm, WORD operand);
+void strcpy_execution(VM *vm, WORD operand);
+void strcat_execution(VM *vm, WORD operand);
+void strcmp_execution(VM *vm, WORD operand);
+            //floats functions
+void loadf_execution(VM *vm, WORD operand);
+void storef_execution(VM *vm, WORD operand);
+void addf_execution(VM *vm, WORD operand);
+void subf_execution(VM *vm, WORD operand);
+void multf_execution(VM *vm, WORD operand);
+void divf_execution(VM *vm, WORD operand);
+void itof_execution(VM *vm, WORD operand);
+void ftoi_execution(VM *vm, WORD operand);
+            //functions call
+void call_execution(VM *vm, WORD operand);
+void ret_execution(VM *vm, WORD operand);
+
+void mov_execution(VM *vm, WORD operand);
+            //printing values
+void printi_execution(VM *vm, WORD operand);
+void prints_execution(VM *vm, WORD operand);
+void printf_execution(VM *vm, WORD operand);
+            //more bitwise oprations
+void shl_execution(VM *vm, WORD operand);
+void shr_execution(VM *vm, WORD operand);
+
+void je_execution(VM *vm, WORD operand);
+void jne_execution(VM *vm, WORD operand);
+            // reading a value
+void readi_execution(VM *vm, WORD operand);
+void reads_execution(VM *vm, WORD operand);
+void readf_execution(VM *vm, WORD operand);
+            //syscalls
+void syscall_execution(VM *vm, WORD operand);
+
 
 #endif // VM_32B_H_INCLUDED
